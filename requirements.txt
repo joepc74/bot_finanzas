@@ -1,0 +1,4 @@
+matplotlib==3.10.8
+pyTelegramBotAPI==4.30.0
+python-dotenv==1.2.1
+yfinance==1.1.0
