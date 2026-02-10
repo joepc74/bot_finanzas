@@ -12,8 +12,29 @@ TOKEN = os.getenv('KEY_TELEGRAM')
 bot = AsyncTeleBot(token=TOKEN)
 con=None
 
+def is_admin_user(id):
+    """Check if the user ID is admin.
+
+    Args:
+        id: The user ID to validate.
+
+    Returns:
+        bool: True if the user is admin, False otherwise.
+    """
+    try:
+        return id==int(os.getenv('ADMIN_USER_ID'))
+    except:
+        return False
+
 def is_valid_user(id):
-    """Check if the user ID is valid."""
+    """Check if the user ID is valid.
+
+    Args:
+        id: The user ID to validate.
+
+    Returns:
+        bool: True if the user is authorized, False otherwise.
+    """
     # Implement your logic to check if the user ID is valid
     # For example, you can maintain a list of allowed user IDs
     allowed_users = [201580722, 201580722]  # Replace with actual user IDs
@@ -21,12 +42,20 @@ def is_valid_user(id):
 
 @bot.message_handler(commands=['start'])
 async def send_welcome(message):
-    """Send a message when the command /start is issued."""
+    """Send a welcome message when the command /start is issued.
+
+    Args:
+        message: The message object containing user and chat information.
+    """
     await bot.reply_to(message, 'Welcome! Use /price <ticker> to get the current price of a stock.\nUse /help for more commands.')
 
 @bot.message_handler(commands=['help'])
 async def send_help(message):
-    """Send a message when the command /help is issued."""
+    """Send a help message with all available commands when /help is issued.
+
+    Args:
+        message: The message object containing user and chat information.
+    """
     await bot.reply_to(message,'''Available commands:
                               /price <ticker> - Get current price of a stock.
                               /sma <ticker> <*short_period> <*long_period> - Get SMA crossover graph, periods are 9 and 20 by default.
@@ -35,6 +64,15 @@ async def send_help(message):
                               /untrack <ticker> - Stop tracking a stock.
                               /tracks - Show tracked stocks.''')
 def is_tracking(user_id, ticker):
+    """Check if a user is tracking a specific stock ticker.
+
+    Args:
+        user_id: The user's ID.
+        ticker: The stock ticker symbol.
+
+    Returns:
+        The tracking record if found, None otherwise.
+    """
     global con
     cursor= con.cursor()
     cursor.execute("SELECT * FROM tracks WHERE user_id=? AND ticker=?;", (user_id, ticker))
@@ -42,10 +80,14 @@ def is_tracking(user_id, ticker):
 
 @bot.message_handler(commands=['price'])
 async def send_price(message):
+    """Fetch and send the current price of a stock ticker.
+
+    Args:
+        message: The message object containing user and chat information. Format: /price <ticker>
+    """
     if not is_valid_user(message.from_user.id):
         await bot.reply_to(message, "Unauthorized access.")
         return
-    """Get the current price of a stock."""
     ticker = message.text.split()[1] if len(message.text.split()) > 1 else None
     logging.info(f"User {message.from_user.id} requested price for {ticker}.")
     try:
@@ -59,10 +101,15 @@ async def send_price(message):
 
 @bot.message_handler(commands=['sma'])
 async def send_sma(message) -> None:
+    """Generate and send a SMA (Simple Moving Average) crossover graph for a stock.
+
+    Args:
+        message: The message object containing user and chat information. Format: /sma <ticker> [short_period] [long_period]
+                 Default periods are 9 (short) and 20 (long).
+    """
     if not is_valid_user(message.from_user.id):
         await bot.reply_to(message, "Unauthorized access.")
         return
-    """Generate and send SMA crossover graph."""
     ticker = message.text.split()[1] if len(message.text.split()) > 1 else None
     short_period = int(message.text.split()[2]) if len(message.text.split()) > 2 else 9
     long_period = int(message.text.split()[3]) if len(message.text.split()) > 3 else 20
@@ -99,7 +146,17 @@ async def send_sma(message) -> None:
         logging.error(f"Error generating SMA graph for {ticker}: {e}")
         await bot.reply_to(message,"Error generating SMA graph.")
 
-def graph(ticket,period="1y",buy_price=None):
+def graph(ticket, period="1y", buy_price=None):
+    """Generate a price graph for a stock ticker.
+
+    Args:
+        ticket: The stock ticker symbol.
+        period: The time period for the graph (default: '1y'). Valid values: 1d, 5d, 1mo, 3mo, 6mo, 1y, 2y, 5y, 10y, ytd, max.
+        buy_price: Optional buy price to display as a horizontal line on the graph.
+
+    Returns:
+        bytes: PNG image of the stock price graph.
+    """
     stock = yf.Ticker(ticket)
     data = stock.history(period=period)
 
@@ -122,10 +179,15 @@ def graph(ticket,period="1y",buy_price=None):
 
 @bot.message_handler(commands=['graph'])
 async def send_graph(message):
+    """Generate and send a price graph for a stock ticker.
+
+    Args:
+        message: The message object containing user and chat information. Format: /graph <ticker> [period]
+                 Default period is '1y'. Valid values: 1d, 5d, 1mo, 3mo, 6mo, 1y, 2y, 5y, 10y, ytd, max
+    """
     if not is_valid_user(message.from_user.id):
         await bot.reply_to(message, "Unauthorized access.")
         return
-    """Generate and send price graph."""
     ticker = message.text.split()[1] if len(message.text.split()) > 1 else None
     periodo=message.text.split()[2] if len(message.text.split()) > 2 else '1y' # 1d, 5d, 1mo, 3mo, 6mo, 1y, 2y, 5y, 10y, ytd, max
     logging.info(f"User {message.from_user.id} requested price graph for {ticker} with period {periodo}.")
@@ -139,10 +201,15 @@ async def send_graph(message):
 
 @bot.message_handler(commands=['track'])
 async def track_ticket(message):
+    """Start tracking a stock ticker for periodic price updates.
+
+    Args:
+        message: The message object containing user and chat information. Format: /track <ticker> [buy_price]
+                 Optional buy_price defaults to 0 if not provided.
+    """
     if not is_valid_user(message.from_user.id):
         await bot.reply_to(message, "Unauthorized access.")
         return
-    """Track a ticket."""
     ticker = message.text.split()[1] if len(message.text.split()) > 1 else None
     buy_price = float(message.text.split()[2]) if len(message.text.split()) > 2 else 0
     try:
@@ -159,10 +226,14 @@ async def track_ticket(message):
 
 @bot.message_handler(commands=['tracks'])
 async def tracks(message):
+    """Display all currently tracked stocks for the user.
+
+    Args:
+        message: The message object containing user and chat information.
+    """
     if not is_valid_user(message.from_user.id):
         await bot.reply_to(message, "Unauthorized access.")
         return
-    """Show tracked tickets."""
     global con
     cursor= con.cursor()
     cursor.execute("SELECT ticker, buy_price FROM tracks WHERE user_id=?;", (message.from_user.id,))
@@ -177,10 +248,14 @@ async def tracks(message):
 
 @bot.message_handler(commands=['untrack'])
 async def untrack_ticket(message):
+    """Stop tracking a stock ticker for price updates.
+
+    Args:
+        message: The message object containing user and chat information. Format: /untrack <ticker>
+    """
     if not is_valid_user(message.from_user.id):
         await bot.reply_to(message, "Unauthorized access.")
         return
-    """Untrack a ticket."""
     ticker = message.text.split()[1] if len(message.text.split()) > 1 else None
     try:
         global con
@@ -195,14 +270,24 @@ async def untrack_ticket(message):
 
 @bot.message_handler(commands=['bd'])
 async def envia_bd(message):
-    if not is_valid_user(message.from_user.id):
+    """Send the bot database file to the user (admin only).
+
+    Args:
+        message: The message object containing user and chat information.
+    """
+    if not is_admin_user(message.from_user.id):
         await bot.reply_to(message, "Unauthorized access.")
         return
     await bot.send_document(message.chat.id,open('bot.db','rb'))
     return
 @bot.message_handler(commands=['sql'])
 async def comando_sql(message):
-    if not is_valid_user(message.from_user.id):
+    """Execute a SQL command on the database (admin only).
+
+    Args:
+        message: The message object containing user and chat information. Format: /sql <sql_command>
+    """
+    if not is_admin_user(message.from_user.id):
         await bot.reply_to(message, "Unauthorized access.")
         return
     sql=" ".join(message.text.split()[1:])
@@ -214,6 +299,11 @@ async def comando_sql(message):
         logging.error(f"Error executing SQL command: {e}")
 
 async def actualiza_tickets():
+    """Continuously monitor and send price updates for tracked stocks every 12 hours.
+
+    This function runs in an infinite loop, checking for stocks that need updates
+    and sending price information to their respective users.
+    """
     global con
     cursor= con.cursor()
     while True:
@@ -241,8 +331,11 @@ async def actualiza_tickets():
 
 
 async def main():
-    """Start the bot."""
+    """Initialize and start the bot with all available commands and background tasks.
 
+    This is the main entry point that sets up the bot commands and starts the polling loop
+    along with the price update background task.
+    """
     await bot.set_my_commands([
         BotCommand("start","Start the bot"),
         BotCommand("help","Show help message"),
@@ -265,6 +358,10 @@ async def main():
         bot.close()
 
 def init_db():
+    """Initialize the database connection and create the tracks table if it doesn't exist.
+
+    This function sets up the SQLite database for storing tracked stocks information.
+    """
     logging.info("Initializing database connection...")
     global con
     con = sqlite3.connect("bot.db")
@@ -273,6 +370,10 @@ def init_db():
     con.execute("CREATE TABLE IF NOT EXISTS tracks (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER, ticker TEXT, last_check TIMESTAMP DEFAULT CURRENT_TIMESTAMP, buy_price REAL NOT NULL DEFAULT 0);")
 
 def text():
+    """Debug function to print all available information for a test ticker (AUCO.L).
+
+    This is a utility function used for testing and debugging ticker data.
+    """
     dat = yf.Ticker("AUCO.L")
     # print(dat.__dict__)
     print('\n'.join(f'{k}: {v}' for k, v in dat.info.items()))
