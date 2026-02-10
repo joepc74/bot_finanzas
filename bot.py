@@ -2,10 +2,9 @@ import yfinance as yf
 import matplotlib.pyplot as plt
 from dotenv import load_dotenv
 import os, asyncio, logging, sqlite3, io
-from telebot import asyncio_filters, types
+from telebot import asyncio_filters
 from telebot.types import *
 from telebot.async_telebot import AsyncTeleBot
-from telebot.asyncio_handler_backends import State, StatesGroup
 
 # Replace with your actual Telegram Bot Token
 load_dotenv()
@@ -30,8 +29,10 @@ async def send_help(message):
     """Send a message when the command /help is issued."""
     await bot.reply_to(message,'''Available commands:
                               /price <ticker> - Get current price of a stock.
-                              /sma <ticker> <short_period> <long_period> - Get SMA crossover graph.
-                              /graph <ticker> <*period> - Get price graph of a stock, period is 1d, 5d, 1mo, 3mo, 6mo, 1y (defaul value), 2y, 5y, 10y, ytd, max.''')
+                              /sma <ticker> <*short_period> <*long_period> - Get SMA crossover graph, periods are 9 and 20 by default.
+                              /graph <ticker> <*period> - Get price graph of a stock, period is 1d, 5d, 1mo, 3mo, 6mo, 1y (defaul value), 2y, 5y, 10y, ytd, max.
+                              /track <ticker> - Track a stock for price updates every 12 hours.
+                              /untrack <ticker> - Stop tracking a stock.''')
 
 @bot.message_handler(commands=['prize'])
 async def send_prize(message):
@@ -77,12 +78,15 @@ async def send_sma(message) -> None:
         plt.legend()
         plt.grid(True)
 
-        # Save the graph temporarily
-        plt.savefig('sma_graph.png')
 
+        # Save the graph to a bytes buffer
+        buf = io.BytesIO()
+        plt.savefig(buf, format='png')
+        image_bytes = buf.getvalue()
         # Send the graph to the user
-        # await bot.reply_to(message, f"SMA Crossover graph for {ticker} with short period {short_period} and long period {long_period}:")
-        await bot.send_photo(chat_id=message.chat.id, photo=open('sma_graph.png', 'rb'), caption=f"SMA Crossover graph for {ticker} with short period {short_period} and long period {long_period}:")
+        await bot.send_photo(chat_id=message.chat.id, photo=image_bytes, caption=f"SMA Crossover graph for {ticker} with short period {short_period} and long period {long_period}:")
+        buf.close()
+        plt.close()
 
     except Exception as e:
         print(e)
@@ -141,12 +145,31 @@ async def track_ticket(message):
         logging.error(f"Error tracking {ticker}: {e}")
         await bot.reply_to(message,"Error tracking the ticket.")
 
+
+@bot.message_handler(commands=['untrack'])
+async def untrack_ticket(message):
+    if not is_valid_user(message.from_user.id):
+        await bot.reply_to(message, "Unauthorized access.")
+        return
+    """Untrack a ticket."""
+    ticker = message.text.split()[1] if len(message.text.split()) > 1 else None
+    try:
+        global con
+        cursor= con.cursor()
+        cursor.execute("DELETE FROM tracks WHERE chat_id=? AND ticker=?;", (message.chat.id, ticker))
+        con.commit()
+        await bot.reply_to(message,f"Untracked {ticker}.")
+    except Exception as e:
+        print(e)
+        logging.error(f"Error untracking {ticker}: {e}")
+        await bot.reply_to(message,"Error untracking the ticket.")
+
 async def actualiza_tickets():
     global con
     cursor= con.cursor()
     while True:
         logging.info("Checking for tickets ...")
-        seguimentos= cursor.execute("SELECT * FROM tracks;").fetchall()
+        seguimentos= cursor.execute("SELECT * FROM tracks WHERE last_check < datetime('now', '-11 hours');").fetchall()
         if seguimentos:
             for seguimiento in seguimentos:
                 id, chat_id, ticker, last_check = seguimiento
@@ -155,7 +178,9 @@ async def actualiza_tickets():
                     current_price = stock.info['regularMarketPrice']
                     min_price=stock.info['dayLow']
                     max_price=stock.info['dayHigh']
-                    await bot.send_message(chat_id, f"Current price of {stock.info["longName"]} ({ticker}): {current_price}\nMin: {min_price}\nMax: {max_price}")
+                    open_price=stock.info['open']
+                    change=round((current_price-open_price)/current_price*100,2) if current_price else 0
+                    await bot.send_message(chat_id, f"Current price of {stock.info['longName']} ({ticker}): {current_price}\nMin: {min_price}\nMax: {max_price}\nChange: {change}%")
                     cursor.execute(f"UPDATE tracks SET last_check=current_timestamp WHERE id={id};")
                     con.commit()
                 except Exception as e:
@@ -168,13 +193,15 @@ async def actualiza_tickets():
 async def main():
     """Start the bot."""
 
-    # asyncio.run(bot.set_my_commands([
-    #     BotCommand("start"),
-    #     BotCommand("help"),
-    #     BotCommand("price"),
-    #     BotCommand("sma"),
-    #     BotCommand("graph")
-    # ]))
+    await bot.set_my_commands([
+        BotCommand("start","Start the bot"),
+        BotCommand("help","Show help message"),
+        BotCommand("price","Show current price of a stock"),
+        BotCommand("sma","Show SMA of a stock"),
+        BotCommand("graph","Show price graph of a stock"),
+        BotCommand("track","Track a stock"),
+        BotCommand("untrack","Untrack a stock")
+    ])
 
     try:
         bot.add_custom_filter(asyncio_filters.StateFilter(bot))
@@ -191,6 +218,8 @@ def init_db():
     global con
     con = sqlite3.connect("bot.db")
     con.row_factory = sqlite3.Row
+    # Create the tracks table if it doesn't exist
+    con.execute("CREATE TABLE IF NOT EXISTS tracks (id INTEGER PRIMARY KEY AUTOINCREMENT, chat_id INTEGER, ticker TEXT, last_check TIMESTAMP DEFAULT CURRENT_TIMESTAMP, buy_price REAL NOT NULL DEFAULT 0);")
 
 def text():
     dat = yf.Ticker("AUCO.L")
@@ -204,8 +233,6 @@ def text():
 
 if __name__ == '__main__':
     if '-log' in os.sys.argv:
-        logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s', filename='bot.log')
-    if '-log_error' in os.sys.argv:
         logging.basicConfig(level=logging.ERROR, format='%(asctime)s - %(levelname)s - %(message)s', filename='bot.log')
     init_db()
     asyncio.run(main())
