@@ -193,6 +193,26 @@ async def untrack_ticket(message):
         logging.error(f"Error untracking {ticker}: {e}")
         await bot.reply_to(message,"Error untracking the ticket.")
 
+@bot.message_handler(commands=['bd'])
+async def envia_bd(message):
+    if not is_valid_user(message.from_user.id):
+        await bot.reply_to(message, "Unauthorized access.")
+        return
+    await bot.send_document(message.chat.id,open('bot.db','rb'))
+    return
+@bot.message_handler(commands=['sql'])
+async def comando_sql(message):
+    if not is_valid_user(message.from_user.id):
+        await bot.reply_to(message, "Unauthorized access.")
+        return
+    sql=" ".join(message.text.split()[1:])
+    try:
+        con.execute(sql)
+        con.commit()
+        await bot.reply_to(message, "Ejecutado", parse_mode='Markdown')
+    except Exception as e:
+        logging.error(f"Error executing SQL command: {e}")
+
 async def actualiza_tickets():
     global con
     cursor= con.cursor()
@@ -265,5 +285,7 @@ def text():
 if __name__ == '__main__':
     if '-log' in os.sys.argv:
         logging.basicConfig(level=logging.ERROR, format='%(asctime)s - %(levelname)s - %(message)s', filename='bot.log')
+    else:
+        logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s', filename='bot.log')
     init_db()
     asyncio.run(main())
