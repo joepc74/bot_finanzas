@@ -32,10 +32,16 @@ async def send_help(message):
                               /sma <ticker> <*short_period> <*long_period> - Get SMA crossover graph, periods are 9 and 20 by default.
                               /graph <ticker> <*period> - Get price graph of a stock, period is 1d, 5d, 1mo, 3mo, 6mo, 1y (defaul value), 2y, 5y, 10y, ytd, max.
                               /track <ticker> - Track a stock for price updates every 12 hours.
-                              /untrack <ticker> - Stop tracking a stock.''')
+                              /untrack <ticker> - Stop tracking a stock.
+                              /tracks - Show tracked stocks.''')
+def is_tracking(chat_id, ticker):
+    global con
+    cursor= con.cursor()
+    cursor.execute("SELECT * FROM tracks WHERE chat_id=? AND ticker=?;", (chat_id, ticker))
+    return cursor.fetchone()
 
-@bot.message_handler(commands=['prize'])
-async def send_prize(message):
+@bot.message_handler(commands=['price'])
+async def send_price(message):
     if not is_valid_user(message.from_user.id):
         await bot.reply_to(message, "Unauthorized access.")
         return
@@ -45,7 +51,7 @@ async def send_prize(message):
     try:
         stock = yf.Ticker(ticker)
         current_price = stock.info['regularMarketPrice']
-        await bot.reply_to(message,f"Current price of {ticker}: {current_price}")
+        await bot.reply_to(message,f"Current price of {stock.info['longName']} ({ticker}): {current_price}")
     except Exception as e:
         print(e)
         logging.error(f"Error fetching price for {ticker}: {e}")
@@ -93,6 +99,27 @@ async def send_sma(message) -> None:
         logging.error(f"Error generating SMA graph for {ticker}: {e}")
         await bot.reply_to(message,"Error generating SMA graph.")
 
+def graph(ticket,period="1y",buy_price=None):
+    stock = yf.Ticker(ticket)
+    data = stock.history(period=period)
+
+    plt.figure(figsize=(12, 6))
+    plt.plot(data['Close'], label='Close')
+    plt.xlabel('Date')
+    plt.ylabel('Price')
+    plt.title(f'Price Graph for {stock.info["longName"]} ({ticket})')
+    if buy_price:
+        plt.axhline(y=buy_price, color='r', linestyle='--', label=f'Buy Price: {buy_price}')
+    plt.legend()
+    plt.grid(True)
+
+    buf = io.BytesIO()
+    plt.savefig(buf, format='png')
+    image_bytes = buf.getvalue()
+    buf.close()
+    plt.close()
+    return image_bytes
+
 @bot.message_handler(commands=['graph'])
 async def send_graph(message):
     if not is_valid_user(message.from_user.id):
@@ -103,24 +130,8 @@ async def send_graph(message):
     periodo=message.text.split()[2] if len(message.text.split()) > 2 else '1y' # 1d, 5d, 1mo, 3mo, 6mo, 1y, 2y, 5y, 10y, ytd, max
     logging.info(f"User {message.from_user.id} requested price graph for {ticker} with period {periodo}.")
     try:
-        stock = yf.Ticker(ticker)
-        data = stock.history(period=periodo)
-
-        plt.figure(figsize=(12, 6))
-        plt.plot(data['Close'], label='Close')
-        plt.xlabel('Date')
-        plt.ylabel('Price')
-        plt.title(f'Price Graph for {stock.info["longName"]} ({ticker})')
-        plt.legend()
-        plt.grid(True)
-
-        buf = io.BytesIO()
-        plt.savefig(buf, format='png')
-        image_bytes = buf.getvalue()
-        await bot.send_photo(chat_id=message.chat.id, photo=image_bytes, caption=f"Price graph for {ticker}:")
-        buf.close()
-        plt.close()
-
+        track=is_tracking(message.chat.id, ticker)
+        await bot.send_photo(chat_id=message.chat.id, photo=graph(ticker,periodo,buy_price=track['buy_price'] if track else None), caption=f"Price graph for {ticker} with period {periodo}:")
     except Exception as e:
         print(e)
         logging.error(f"Error generating price graph for {ticker}: {e}")
@@ -133,11 +144,12 @@ async def track_ticket(message):
         return
     """Track a ticket."""
     ticker = message.text.split()[1] if len(message.text.split()) > 1 else None
+    buy_price = float(message.text.split()[2]) if len(message.text.split()) > 2 else 0
     try:
         stock = yf.Ticker(ticker)
         global con
         cursor= con.cursor()
-        cursor.execute("INSERT INTO tracks (chat_id, ticker) VALUES (?, ?);", (message.chat.id, ticker))
+        cursor.execute("INSERT INTO tracks (chat_id, ticker, buy_price) VALUES (?, ?, ?);", (message.chat.id, ticker, buy_price))
         con.commit()
         await bot.reply_to(message,f"Tracking {ticker} for price updates.")
     except Exception as e:
@@ -145,6 +157,23 @@ async def track_ticket(message):
         logging.error(f"Error tracking {ticker}: {e}")
         await bot.reply_to(message,"Error tracking the ticket.")
 
+@bot.message_handler(commands=['tracks'])
+async def tracks(message):
+    if not is_valid_user(message.from_user.id):
+        await bot.reply_to(message, "Unauthorized access.")
+        return
+    """Show tracked tickets."""
+    global con
+    cursor= con.cursor()
+    cursor.execute("SELECT ticker, buy_price FROM tracks WHERE chat_id=?;", (message.chat.id,))
+    tracks = cursor.fetchall()
+    if tracks:
+        response = "Tracked tickets:\n"
+        for ticker, buy_price in tracks:
+            response += f"- {ticker} (Buy Price: {buy_price})\n"
+        await bot.reply_to(message, response)
+    else:
+        await bot.reply_to(message, "No tracked tickets.")
 
 @bot.message_handler(commands=['untrack'])
 async def untrack_ticket(message):
@@ -172,7 +201,7 @@ async def actualiza_tickets():
         seguimentos= cursor.execute("SELECT * FROM tracks WHERE last_check < datetime('now', '-11 hours');").fetchall()
         if seguimentos:
             for seguimiento in seguimentos:
-                id, chat_id, ticker, last_check = seguimiento
+                id, chat_id, ticker, last_check, buy_price = seguimiento
                 try:
                     stock = yf.Ticker(ticker)
                     current_price = stock.info['regularMarketPrice']
@@ -180,7 +209,8 @@ async def actualiza_tickets():
                     max_price=stock.info['dayHigh']
                     open_price=stock.info['open']
                     change=round((current_price-open_price)/current_price*100,2) if current_price else 0
-                    await bot.send_message(chat_id, f"Current price of {stock.info['longName']} ({ticker}): {current_price}\nMin: {min_price}\nMax: {max_price}\nChange: {change}%")
+                    buy_change=round((current_price-buy_price)/current_price*100,2) if current_price and buy_price else 0
+                    await bot.send_photo(chat_id=chat_id, photo=graph(ticker,'1mo', buy_price=buy_price if buy_price!=0 else None),caption=f"Current price of {stock.info['longName']} ({ticker}): {current_price}\nMin: {min_price}\nMax: {max_price}\nChange: {change}%\nBuy Change: {buy_change}%")
                     cursor.execute(f"UPDATE tracks SET last_check=current_timestamp WHERE id={id};")
                     con.commit()
                 except Exception as e:
@@ -200,7 +230,8 @@ async def main():
         BotCommand("sma","Show SMA of a stock"),
         BotCommand("graph","Show price graph of a stock"),
         BotCommand("track","Track a stock"),
-        BotCommand("untrack","Untrack a stock")
+        BotCommand("untrack","Untrack a stock"),
+        BotCommand("tracks","Show tracked stocks")
     ])
 
     try:
