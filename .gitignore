@@ -1,4 +1,4 @@
 .env
 *.png
-bot.db
-bot.log
+*.db
+*.log

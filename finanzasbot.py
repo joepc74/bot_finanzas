@@ -34,10 +34,10 @@ async def send_help(message):
                               /track <ticker> - Track a stock for price updates every 12 hours.
                               /untrack <ticker> - Stop tracking a stock.
                               /tracks - Show tracked stocks.''')
-def is_tracking(chat_id, ticker):
+def is_tracking(user_id, ticker):
     global con
     cursor= con.cursor()
-    cursor.execute("SELECT * FROM tracks WHERE chat_id=? AND ticker=?;", (chat_id, ticker))
+    cursor.execute("SELECT * FROM tracks WHERE user_id=? AND ticker=?;", (user_id, ticker))
     return cursor.fetchone()
 
 @bot.message_handler(commands=['price'])
@@ -130,7 +130,7 @@ async def send_graph(message):
     periodo=message.text.split()[2] if len(message.text.split()) > 2 else '1y' # 1d, 5d, 1mo, 3mo, 6mo, 1y, 2y, 5y, 10y, ytd, max
     logging.info(f"User {message.from_user.id} requested price graph for {ticker} with period {periodo}.")
     try:
-        track=is_tracking(message.chat.id, ticker)
+        track=is_tracking(message.from_user.id, ticker)
         await bot.send_photo(chat_id=message.chat.id, photo=graph(ticker,periodo,buy_price=track['buy_price'] if track else None), caption=f"Price graph for {ticker} with period {periodo}:")
     except Exception as e:
         print(e)
@@ -149,7 +149,7 @@ async def track_ticket(message):
         stock = yf.Ticker(ticker)
         global con
         cursor= con.cursor()
-        cursor.execute("INSERT INTO tracks (chat_id, ticker, buy_price) VALUES (?, ?, ?);", (message.chat.id, ticker, buy_price))
+        cursor.execute("INSERT INTO tracks (user_id, ticker, buy_price) VALUES (?, ?, ?);", (message.from_user.id, ticker, buy_price))
         con.commit()
         await bot.reply_to(message,f"Tracking {ticker} for price updates.")
     except Exception as e:
@@ -165,7 +165,7 @@ async def tracks(message):
     """Show tracked tickets."""
     global con
     cursor= con.cursor()
-    cursor.execute("SELECT ticker, buy_price FROM tracks WHERE chat_id=?;", (message.chat.id,))
+    cursor.execute("SELECT ticker, buy_price FROM tracks WHERE user_id=?;", (message.from_user.id,))
     tracks = cursor.fetchall()
     if tracks:
         response = "Tracked tickets:\n"
@@ -185,7 +185,7 @@ async def untrack_ticket(message):
     try:
         global con
         cursor= con.cursor()
-        cursor.execute("DELETE FROM tracks WHERE chat_id=? AND ticker=?;", (message.chat.id, ticker))
+        cursor.execute("DELETE FROM tracks WHERE user_id=? AND ticker=?;", (message.from_user.id, ticker))
         con.commit()
         await bot.reply_to(message,f"Untracked {ticker}.")
     except Exception as e:
@@ -221,7 +221,7 @@ async def actualiza_tickets():
         seguimentos= cursor.execute("SELECT * FROM tracks WHERE last_check < datetime('now', '-11 hours');").fetchall()
         if seguimentos:
             for seguimiento in seguimentos:
-                id, chat_id, ticker, last_check, buy_price = seguimiento
+                id, user_id, ticker, last_check, buy_price = seguimiento
                 try:
                     stock = yf.Ticker(ticker)
                     current_price = stock.info['regularMarketPrice']
@@ -230,12 +230,12 @@ async def actualiza_tickets():
                     open_price=stock.info['open']
                     change=round((current_price-open_price)/current_price*100,2) if current_price else 0
                     buy_change=round((current_price-buy_price)/current_price*100,2) if current_price and buy_price else 0
-                    await bot.send_photo(chat_id=chat_id, photo=graph(ticker,'1mo', buy_price=buy_price if buy_price!=0 else None),caption=f"Current price of {stock.info['longName']} ({ticker}): {current_price}\nMin: {min_price}\nMax: {max_price}\nChange: {change}%\nBuy Change: {buy_change}%")
+                    await bot.send_photo(chat_id=user_id, photo=graph(ticker,'1mo', buy_price=buy_price if buy_price!=0 else None),caption=f"Current price of {stock.info['longName']} ({ticker}): {current_price}\nMin: {min_price}\nMax: {max_price}\nChange: {change}%\nBuy Change: {buy_change}%")
                     cursor.execute(f"UPDATE tracks SET last_check=current_timestamp WHERE id={id};")
                     con.commit()
                 except Exception as e:
                     print(e)
-                    logging.error(f"Error sending message to {chat_id}: {e}")
+                    logging.error(f"Error sending message to {user_id}: {e}")
         logging.info("Price updates checked. Next check in 12 hours.")
         await asyncio.sleep(12*60*60) # se ejecuta cada 12 horas
 
@@ -270,7 +270,7 @@ def init_db():
     con = sqlite3.connect("bot.db")
     con.row_factory = sqlite3.Row
     # Create the tracks table if it doesn't exist
-    con.execute("CREATE TABLE IF NOT EXISTS tracks (id INTEGER PRIMARY KEY AUTOINCREMENT, chat_id INTEGER, ticker TEXT, last_check TIMESTAMP DEFAULT CURRENT_TIMESTAMP, buy_price REAL NOT NULL DEFAULT 0);")
+    con.execute("CREATE TABLE IF NOT EXISTS tracks (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER, ticker TEXT, last_check TIMESTAMP DEFAULT CURRENT_TIMESTAMP, buy_price REAL NOT NULL DEFAULT 0);")
 
 def text():
     dat = yf.Ticker("AUCO.L")
