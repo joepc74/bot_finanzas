@@ -320,7 +320,7 @@ async def actualiza_tickets():
                     open_price=stock.info['open']
                     change=round((current_price-open_price)/current_price*100,2) if current_price else 0
                     buy_change=round((current_price-buy_price)/current_price*100,2) if current_price and buy_price else 0
-                    await bot.send_photo(chat_id=user_id, photo=graph(ticker,'1mo', buy_price=buy_price if buy_price!=0 else None),caption=f"Current price of {stock.info['longName']} ({ticker}): {current_price}\nMin: {min_price}\nMax: {max_price}\nChange: {change}%\nBuy Change: {buy_change}%")
+                    await bot.send_photo(chat_id=user_id, photo=graph(ticker,'1mo', buy_price=buy_price if buy_price!=0 else None),caption=f"Current price of {stock.info['longName']} ({ticker}): {current_price}\nOpen price: {open_price}\nMin: {min_price}\nMax: {max_price}\nChange: {change}%\nBuy Change: {buy_change}%")
                     cursor.execute(f"UPDATE tracks SET last_check=current_timestamp WHERE id={id};")
                     con.commit()
                 except Exception as e:
