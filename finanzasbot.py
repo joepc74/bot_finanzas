@@ -1,7 +1,7 @@
 import yfinance as yf
 import matplotlib.pyplot as plt
 from dotenv import load_dotenv
-import os, asyncio, logging, sqlite3, io
+import os, asyncio, logging, sqlite3, io, datetime
 from telebot import asyncio_filters
 from telebot.types import *
 from telebot.async_telebot import AsyncTeleBot
@@ -308,24 +308,28 @@ async def actualiza_tickets():
     cursor= con.cursor()
     while True:
         logging.info("Checking for tickets ...")
-        seguimentos= cursor.execute("SELECT * FROM tracks WHERE last_check < datetime('now', '-11 hours');").fetchall()
-        if seguimentos:
-            for seguimiento in seguimentos:
-                id, user_id, ticker, last_check, buy_price = seguimiento
-                try:
-                    stock = yf.Ticker(ticker)
-                    current_price = stock.info['regularMarketPrice']
-                    min_price=stock.info['dayLow']
-                    max_price=stock.info['dayHigh']
-                    open_price=stock.info['open']
-                    change=round((current_price-open_price)/current_price*100,2) if current_price else 0
-                    buy_change=round((current_price-buy_price)/current_price*100,2) if current_price and buy_price else 0
-                    await bot.send_photo(chat_id=user_id, photo=graph(ticker,'1mo', buy_price=buy_price if buy_price!=0 else None),caption=f"Current price of {stock.info['longName']} ({ticker}): {current_price}\nOpen price: {open_price}\nMin: {min_price}\nMax: {max_price}\nChange: {change}%\nBuy Change: {buy_change}%")
-                    cursor.execute(f"UPDATE tracks SET last_check=current_timestamp WHERE id={id};")
-                    con.commit()
-                except Exception as e:
-                    print(e)
-                    logging.error(f"Error sending message to {user_id}: {e}")
+        if datetime.datetime.today().weekday()>=5: # no se actualizan los fines de semana
+            logging.info("Weekend detected, skipping price updates.")
+        else:
+            #Si no es fin de semana, se buscan los seguimientos
+            seguimentos= cursor.execute("SELECT * FROM tracks WHERE last_check < datetime('now', '-11 hours');").fetchall()
+            if seguimentos:
+                for seguimiento in seguimentos:
+                    id, user_id, ticker, last_check, buy_price = seguimiento
+                    try:
+                        stock = yf.Ticker(ticker)
+                        current_price = stock.info['regularMarketPrice']
+                        min_price=stock.info['dayLow']
+                        max_price=stock.info['dayHigh']
+                        open_price=stock.info['open']
+                        change=round((current_price-open_price)/current_price*100,2) if current_price else 0
+                        buy_change=round((current_price-buy_price)/current_price*100,2) if current_price and buy_price else 0
+                        await bot.send_photo(chat_id=user_id, photo=graph(ticker,'1mo', buy_price=buy_price if buy_price!=0 else None),caption=f"Current price of {stock.info['longName']} ({ticker}): {current_price}\nOpen price: {open_price}\nMin: {min_price}\nMax: {max_price}\nChange: {change}%\nBuy Change: {buy_change}%")
+                        cursor.execute(f"UPDATE tracks SET last_check=current_timestamp WHERE id={id};")
+                        con.commit()
+                    except Exception as e:
+                        print(e)
+                        logging.error(f"Error sending message to {user_id}: {e}")
         logging.info("Price updates checked. Next check in 12 hours.")
         await asyncio.sleep(12*60*60) # se ejecuta cada 12 horas
 
