@@ -57,12 +57,15 @@ async def send_help(message):
         message: The message object containing user and chat information.
     """
     await bot.reply_to(message,'''Available commands:
-                              /price <ticker> - Get current price of a stock.
-                              /sma <ticker> <*short_period> <*long_period> - Get SMA crossover graph, periods are 9 and 20 by default.
-                              /graph <ticker> <*period> - Get price graph of a stock, period is 1d, 5d, 1mo, 3mo, 6mo, 1y (defaul value), 2y, 5y, 10y, ytd, max.
-                              /track <ticker> - Track a stock for price updates every 12 hours.
-                              /untrack <ticker> - Stop tracking a stock.
-                              /tracks - Show tracked stocks.''')
+    /price <ticker> - Get current price of a stock.
+    /sma <ticker> <*short_period> <*long_period> - Get SMA crossover graph, periods are 9 and 20 by default.
+    /graph <ticker> <*period> - Get price graph of a stock, period is 1d, 5d, 1mo, 3mo, 6mo, 1y (defaul value), 2y, 5y, 10y, ytd, max.
+    /track <ticker> [buy_price] - Track a stock for price updates every 12 hours.
+    /untrack <ticker> - Stop tracking a stock.
+    /tracks - Show tracked stocks.
+    /alert <ticker> <limit_value> - Set an alert for a stock, use < for high limit and > for low limit, example: /alert AUCO.L <1.5
+    /alerts - Show active alerts.
+    /unalert <ticker> - Remove an alert for a stock, format: /unalert <stock_ticker>''')
 def is_tracking(user_id, ticker):
     """Check if a user is tracking a specific stock ticker.
 
@@ -199,6 +202,76 @@ async def send_graph(message):
         logging.error(f"Error generating price graph for {ticker}: {e}")
         await bot.reply_to(message,"Error generating price graph.")
 
+@bot.message_handler(commands=['alerts'])
+async def alerts_show(message):
+    """Display all active alerts for the user.
+
+    Args:
+        message: The message object containing user and chat information.
+    """
+    if not is_valid_user(message.from_user.id):
+        await bot.reply_to(message, "Unauthorized access.")
+        return
+    global con
+    cursor= con.cursor()
+    cursor.execute("SELECT id, ticker, limit_value FROM alerts WHERE user_id=?;", (message.from_user.id,))
+    alerts = cursor.fetchall()
+    if alerts:
+        response = "Active alerts:\n"
+        for id, ticker, limit_value in alerts:
+            response += f"- {ticker} (Limit Value: {limit_value})\n"
+        await bot.reply_to(message, response)
+    else:
+        await bot.reply_to(message, "No active alerts.")
+
+@bot.message_handler(commands=['alert'])
+async def alert_ticket(message):
+    """Set an alert for a stock ticker.
+
+    Args:
+        message: The message object containing user and chat information. Format: /alert <ticker> <limit_value>
+    """
+    if not is_valid_user(message.from_user.id):
+        await bot.reply_to(message, "Unauthorized access.")
+        return
+    try:
+        ticker = message.text.split()[1]
+        limit = message.text.split()[2]
+        if not (limit.startswith('<') or limit.startswith('>')):
+            await bot.reply_to(message, "Invalid limit format. Use < for high limit and > for low limit, example: /alert AUCO.L <1.5")
+            return
+        global con
+        cursor= con.cursor()
+        cursor.execute("INSERT INTO alerts (user_id, ticker, limit_value) VALUES (?, ?, ?);", (message.from_user.id, ticker, limit))
+        con.commit()
+        await bot.reply_to(message,f"Alert set for {ticker} with limit value {limit}.")
+    except Exception as e:
+        print(e)
+        logging.error(f"Error setting alert for {ticker}: {e}")
+        await bot.reply_to(message,"Error setting alert.")
+
+@bot.message_handler(commands=['unalert'])
+async def unalert_ticket(message):
+    """Remove an alert for a stock ticker.
+
+    Args:
+        message: The message object containing user and chat information. Format: /unalert <ticker>
+    """
+    if not is_valid_user(message.from_user.id):
+        await bot.reply_to(message, "Unauthorized access.")
+        return
+    ticker = message.text.split()[1] if len(message.text.split()) > 1 else None
+    try:
+        global con
+        cursor= con.cursor()
+        cursor.execute("DELETE FROM alerts WHERE user_id=? AND ticker=?;", (message.from_user.id, ticker))
+        con.commit()
+        await bot.reply_to(message,f"Alert removed for {ticker}.")
+    except Exception as e:
+        print(e)
+        logging.error(f"Error removing alert for {ticker}: {e}")
+        await bot.reply_to(message,"Error removing alert.")
+
 @bot.message_handler(commands=['track'])
 async def track_ticket(message):
     """Start tracking a stock ticker for periodic price updates.
@@ -280,6 +353,7 @@ async def envia_bd(message):
         return
     await bot.send_document(message.chat.id,open('bot.db','rb'))
     return
+
 @bot.message_handler(commands=['sql'])
 async def comando_sql(message):
     """Execute a SQL command on the database (admin only).
@@ -333,6 +407,42 @@ async def actualiza_tickets():
         logging.info("Price updates checked. Next check in 12 hours.")
         await asyncio.sleep(12*60*60) # se ejecuta cada 12 horas
 
+async def actualiza_alertas():
+    """Continuously monitor stock prices and send alerts based on user-defined limits every 5 minutes.
+
+    This function runs in an infinite loop, checking for active alerts and sending notifications
+    to users when their specified price limits are breached.
+    """
+    global con
+    cursor= con.cursor()
+    while True:
+        logging.info("Checking for alerts ...")
+        if datetime.datetime.today().weekday()>=5: # no se actualizan los fines de semana
+            logging.info("Weekend detected, skipping alert checks.")
+        else:
+            #Si no es fin de semana, se buscan las alertas
+            alertas= cursor.execute("SELECT * FROM alerts WHERE last_check < datetime('now', '-4 minutes');").fetchall()
+            if alertas:
+                for alerta in alertas:
+                    id, user_id, ticker, last_check, limit_value = alerta
+                    try:
+                        stock = yf.Ticker(ticker)
+                        current_price = stock.info['regularMarketPrice']
+                        logging.info(f"Checking alert for {ticker} and user {user_id}: current price {current_price}, limit {limit_value}")
+                        if limit_value.startswith('<') and current_price < float(limit_value[1:]):
+                            await bot.send_message(chat_id=user_id, text=f"Alert: {ticker} has fallen below your low limit of {limit_value[1:]}. Current price: {current_price}\nAlert removed.")
+                            cursor.execute(f"DELETE FROM alerts WHERE id={id};")
+                        elif limit_value.startswith('>') and current_price > float(limit_value[1:]):
+                            await bot.send_message(chat_id=user_id, text=f"Alert: {ticker} has risen above your high limit of {limit_value[1:]}. Current price: {current_price}\nAlert removed.")
+                            cursor.execute(f"DELETE FROM alerts WHERE id={id};")
+                        else:
+                            cursor.execute(f"UPDATE alerts SET last_check=current_timestamp WHERE id={id};")
+                        con.commit()
+                    except Exception as e:
+                        print(e)
+                        logging.error(f"Error checking alert for {ticker} and user {user_id}: {e}")
+        logging.info("Alert checks completed. Next check in 5 minutes.")
+        await asyncio.sleep(5*60) # se ejecuta cada 5 minutos para revisar las alertas
 
 async def main():
     """Initialize and start the bot with all available commands and background tasks.
@@ -343,12 +453,15 @@ async def main():
     await bot.set_my_commands([
         BotCommand("start","Start the bot"),
         BotCommand("help","Show help message"),
-        BotCommand("price","Show current price of a stock"),
-        BotCommand("sma","Show SMA of a stock"),
-        BotCommand("graph","Show price graph of a stock"),
-        BotCommand("track","Track a stock"),
+        BotCommand("price","Show current price of a stock, format: /price <ticker>"),
+        BotCommand("sma","Show SMA of a stock, format: /sma <ticker> [short_period] [long_period], default periods are 9 and 20"),
+        BotCommand("graph","Show price graph of a stock, format: /graph <ticker> [period], default period is 1y, valid values: 1d, 5d, 1mo, 3mo, 6mo, 1y, 2y, 5y, 10y, ytd, max"),
+        BotCommand("track","Track a stock, format: /track <ticker> [buy_price]"),
         BotCommand("untrack","Untrack a stock"),
-        BotCommand("tracks","Show tracked stocks")
+        BotCommand("tracks","Show tracked stocks"),
+        BotCommand("alert","Add an alert for a stock, usa < for high limit and > for low limit, example: /alert AUCO.L <1.5"),
+        BotCommand("alerts","Show active alerts"),
+        BotCommand("unalert","Remove an alert, format: /unalert <stock_ticker>")
     ])
 
     try:
@@ -356,6 +469,7 @@ async def main():
         L = await asyncio.gather(
             # update_cambios(),
             actualiza_tickets(),
+            actualiza_alertas(),
             bot.polling(non_stop=True)
             )
     finally:
@@ -372,6 +486,7 @@ def init_db():
     con.row_factory = sqlite3.Row
     # Create the tracks table if it doesn't exist
     con.execute("CREATE TABLE IF NOT EXISTS tracks (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER, ticker TEXT, last_check TIMESTAMP DEFAULT CURRENT_TIMESTAMP, buy_price REAL NOT NULL DEFAULT 0);")
+    con.execute("CREATE TABLE IF NOT EXISTS alerts (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER, ticker TEXT, last_check TIMESTAMP DEFAULT CURRENT_TIMESTAMP, limit_value TEXT NOT NULL);")
 
 def text():
     """Debug function to print all available information for a test ticker (AUCO.L).
