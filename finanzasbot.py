@@ -439,7 +439,6 @@ async def actualiza_alertas():
                             cursor.execute(f"UPDATE alerts SET last_check=current_timestamp WHERE id={id};")
                         con.commit()
                     except Exception as e:
-                        print(e)
                         logging.error(f"Error checking alert for {ticker} and user {user_id}: {e}")
         logging.info("Alert checks completed. Next check in 5 minutes.")
         await asyncio.sleep(5*60) # se ejecuta cada 5 minutos para revisar las alertas
@@ -504,8 +503,7 @@ def text():
 
 if __name__ == '__main__':
     if '-log' in os.sys.argv:
-        logging.basicConfig(level=logging.ERROR, format='%(asctime)s - %(levelname)s - %(message)s', filename='bot.log')
-    else:
         logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s', filename='bot.log')
+        logging.info("Bot started with info logging enabled.")
     init_db()
     asyncio.run(main())
