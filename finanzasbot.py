@@ -402,8 +402,7 @@ async def actualiza_tickets():
                         cursor.execute(f"UPDATE tracks SET last_check=current_timestamp WHERE id={id};")
                         con.commit()
                     except Exception as e:
-                        print(e)
-                        logging.error(f"Error sending message to {user_id}: {e}")
+                        logging.error(f"Error sending message to {user_id}: {e.__str__()}")
         logging.info("Price updates checked. Next check in 12 hours.")
         await asyncio.sleep(12*60*60) # se ejecuta cada 12 horas
 
@@ -439,7 +438,7 @@ async def actualiza_alertas():
                             cursor.execute(f"UPDATE alerts SET last_check=current_timestamp WHERE id={id};")
                         con.commit()
                     except Exception as e:
-                        logging.error(f"Error checking alert for {ticker} and user {user_id}: {e}")
+                        logging.error(f"Error checking alert for {ticker} and user {user_id}: {e.__str__()}")
         logging.info("Alert checks completed. Next check in 5 minutes.")
         await asyncio.sleep(5*60) # se ejecuta cada 5 minutos para revisar las alertas
 
@@ -487,7 +486,7 @@ def init_db():
     con.execute("CREATE TABLE IF NOT EXISTS tracks (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER, ticker TEXT, last_check TIMESTAMP DEFAULT CURRENT_TIMESTAMP, buy_price REAL NOT NULL DEFAULT 0);")
     con.execute("CREATE TABLE IF NOT EXISTS alerts (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER, ticker TEXT, last_check TIMESTAMP DEFAULT CURRENT_TIMESTAMP, limit_value TEXT NOT NULL);")
 
-def text():
+def test():
     """Debug function to print all available information for a test ticker (AUCO.L).
 
     This is a utility function used for testing and debugging ticker data.
