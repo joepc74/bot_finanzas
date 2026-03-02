@@ -486,20 +486,6 @@ def init_db():
     con.execute("CREATE TABLE IF NOT EXISTS tracks (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER, ticker TEXT, last_check TIMESTAMP DEFAULT CURRENT_TIMESTAMP, buy_price REAL NOT NULL DEFAULT 0);")
     con.execute("CREATE TABLE IF NOT EXISTS alerts (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER, ticker TEXT, last_check TIMESTAMP DEFAULT CURRENT_TIMESTAMP, limit_value TEXT NOT NULL);")
 
-def test():
-    """Debug function to print all available information for a test ticker (AUCO.L).
-
-    This is a utility function used for testing and debugging ticker data.
-    """
-    dat = yf.Ticker("AUCO.L")
-    # print(dat.__dict__)
-    print('\n'.join(f'{k}: {v}' for k, v in dat.info.items()))
-    # print(dat.calendar)
-    # print(dat.analyst_price_targets)
-    # print(dat.quarterly_income_stmt)
-    # print(dat.history(period='1mo'))
-    # print(dat.option_chain(dat.options[0]).calls)
-
 if __name__ == '__main__':
     if '-log' in os.sys.argv:
         logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s', filename='bot.log')
