@@ -98,7 +98,6 @@ async def send_price(message):
         current_price = stock.info['regularMarketPrice']
         await bot.reply_to(message,f"Current price of {stock.info['longName']} ({ticker}): {current_price}")
     except Exception as e:
-        print(e)
         logging.error(f"Error fetching price for {ticker}: {e}")
         await bot.reply_to(message,"Invalid ticker symbol.")
 
@@ -145,7 +144,6 @@ async def send_sma(message) -> None:
         plt.close()
 
     except Exception as e:
-        print(e)
         logging.error(f"Error generating SMA graph for {ticker}: {e}")
         await bot.reply_to(message,"Error generating SMA graph.")
 
@@ -198,7 +196,6 @@ async def send_graph(message):
         track=is_tracking(message.from_user.id, ticker)
         await bot.send_photo(chat_id=message.chat.id, photo=graph(ticker,periodo,buy_price=track['buy_price'] if track else None), caption=f"Price graph for {ticker} with period {periodo}:")
     except Exception as e:
-        print(e)
         logging.error(f"Error generating price graph for {ticker}: {e}")
         await bot.reply_to(message,"Error generating price graph.")
 
@@ -246,7 +243,6 @@ async def alert_ticket(message):
         con.commit()
         await bot.reply_to(message,f"Alert set for {ticker} with limit value {limit}.")
     except Exception as e:
-        print(e)
         logging.error(f"Error setting alert for {ticker}: {e}")
         await bot.reply_to(message,"Error setting alert.")
 
@@ -268,7 +264,6 @@ async def unalert_ticket(message):
         con.commit()
         await bot.reply_to(message,f"Alert removed for {ticker}.")
     except Exception as e:
-        print(e)
         logging.error(f"Error removing alert for {ticker}: {e}")
         await bot.reply_to(message,"Error removing alert.")
 
@@ -293,7 +288,6 @@ async def track_ticket(message):
         con.commit()
         await bot.reply_to(message,f"Tracking {ticker} for price updates.")
     except Exception as e:
-        print(e)
         logging.error(f"Error tracking {ticker}: {e}")
         await bot.reply_to(message,"Error tracking the ticket.")
 
@@ -337,7 +331,6 @@ async def untrack_ticket(message):
         con.commit()
         await bot.reply_to(message,f"Untracked {ticker}.")
     except Exception as e:
-        print(e)
         logging.error(f"Error untracking {ticker}: {e}")
         await bot.reply_to(message,"Error untracking the ticket.")
 
