@@ -3,3 +3,4 @@
 *.db
 *.log
 test_infoticket.py
+*.7z

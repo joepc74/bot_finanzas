@@ -60,7 +60,8 @@ async def send_help(message):
     /price <ticker> - Get current price of a stock.
     /sma <ticker> <*short_period> <*long_period> - Get SMA crossover graph, periods are 9 and 20 by default.
     /graph <ticker> <*period> - Get price graph of a stock, period is 1d, 5d, 1mo, 3mo, 6mo, 1y (defaul value), 2y, 5y, 10y, ytd, max.
-    /track <ticker> [buy_price] - Track a stock for price updates every 12 hours.
+    /track <ticker> [buy_price] [update_interval_in_hours] - Track a stock for price, default update every 12 hours.
+    /track_change_interval <ticker> <update_interval_in_hours> - Change the update interval for a tracked stock.
     /untrack <ticker> - Stop tracking a stock.
     /tracks - Show tracked stocks.
     /alert <ticker> <limit_value> - Set an alert for a stock, use < for high limit and > for low limit, example: /alert AUCO.L <1.5
@@ -280,13 +281,14 @@ async def track_ticket(message):
         return
     ticker = message.text.split()[1] if len(message.text.split()) > 1 else None
     buy_price = float(message.text.split()[2]) if len(message.text.split()) > 2 else 0
+    update_interval= int(message.text.split()[3]) if len(message.text.split()) > 3 else 12 # default update every 12 hours
     try:
         stock = yf.Ticker(ticker)
         global con
         cursor= con.cursor()
-        cursor.execute("INSERT INTO tracks (user_id, ticker, buy_price) VALUES (?, ?, ?);", (message.from_user.id, ticker, buy_price))
+        cursor.execute("INSERT INTO tracks (user_id, ticker, buy_price, update_interval) VALUES (?, ?, ?, ?);", (message.from_user.id, ticker, buy_price, update_interval))
         con.commit()
-        await bot.reply_to(message,f"Tracking {ticker} for price updates.")
+        await bot.reply_to(message,f"Tracking {ticker} for price updates every {update_interval} hours.")
     except Exception as e:
         logging.error(f"Error tracking {ticker}: {e}")
         await bot.reply_to(message,"Error tracking the ticket.")
@@ -312,6 +314,31 @@ async def tracks(message):
         await bot.reply_to(message, response)
     else:
         await bot.reply_to(message, "No tracked tickets.")
+
+@bot.message_handler(commands=['track_change_interval'])
+async def track_change_interval(message):
+    """Change the update interval for a tracked stock.
+
+    Args:
+        message: The message object containing user and chat information. Format: /track_change_interval <ticker> <update_interval_in_hours>
+    """
+    if not is_valid_user(message.from_user.id):
+        await bot.reply_to(message, "Unauthorized access.")
+        return
+    ticker = message.text.split()[1] if len(message.text.split()) > 1 else None
+    update_interval = int(message.text.split()[2]) if len(message.text.split()) > 2 else None
+    if not update_interval:
+        await bot.reply_to(message, "Invalid update interval. Please provide a valid number of hours.")
+        return
+    try:
+        global con
+        cursor= con.cursor()
+        cursor.execute("UPDATE tracks SET update_interval=? WHERE user_id=? AND ticker=?;", (update_interval, message.from_user.id, ticker))
+        con.commit()
+        await bot.reply_to(message,f"Update interval for {ticker} changed to every {update_interval} hours.")
+    except Exception as e:
+        logging.error(f"Error changing update interval for {ticker}: {e}")
+        await bot.reply_to(message,"Error changing update interval for the ticket.")
 
 @bot.message_handler(commands=['untrack'])
 async def untrack_ticket(message):
@@ -379,10 +406,10 @@ async def actualiza_tickets():
             logging.info("Weekend detected, skipping price updates.")
         else:
             #Si no es fin de semana, se buscan los seguimientos
-            seguimentos= cursor.execute("SELECT * FROM tracks WHERE last_check < datetime('now', '-11 hours');").fetchall()
+            seguimentos= cursor.execute("SELECT * FROM tracks WHERE next_check < datetime('now');").fetchall()
             if seguimentos:
                 for seguimiento in seguimentos:
-                    id, user_id, ticker, last_check, buy_price = seguimiento
+                    id, user_id, ticker, next_check, buy_price, update_interval = seguimiento
                     try:
                         stock = yf.Ticker(ticker)
                         current_price = stock.info['regularMarketPrice']
@@ -392,12 +419,12 @@ async def actualiza_tickets():
                         change=round((current_price-open_price)/current_price*100,2) if current_price else 0
                         buy_change=round((current_price-buy_price)/current_price*100,2) if current_price and buy_price else 0
                         await bot.send_photo(chat_id=user_id, photo=graph(ticker,'1mo', buy_price=buy_price if buy_price!=0 else None),caption=f"Current price of {stock.info['longName']} ({ticker}): {current_price}\nOpen price: {open_price}\nMin: {min_price}\nMax: {max_price}\nChange: {change}%\nBuy Change: {buy_change}%")
-                        cursor.execute(f"UPDATE tracks SET last_check=current_timestamp WHERE id={id};")
+                        cursor.execute(f"UPDATE tracks SET next_check=datetime('now', '+{update_interval} hours') WHERE id={id};")
                         con.commit()
                     except Exception as e:
                         logging.error(f"Error sending message to {user_id}: {e.__str__()}")
-        logging.info("Price updates checked. Next check in 12 hours.")
-        await asyncio.sleep(12*60*60) # se ejecuta cada 12 horas
+        logging.info("Price updates checked. Next check in 1 hour.")
+        await asyncio.sleep(60*60) # se ejecuta cada 1 hora
 
 async def actualiza_alertas():
     """Continuously monitor stock prices and send alerts based on user-defined limits every 5 minutes.
@@ -447,7 +474,8 @@ async def main():
         BotCommand("price","Show current price of a stock, format: /price <ticker>"),
         BotCommand("sma","Show SMA of a stock, format: /sma <ticker> [short_period] [long_period], default periods are 9 and 20"),
         BotCommand("graph","Show price graph of a stock, format: /graph <ticker> [period], default period is 1y, valid values: 1d, 5d, 1mo, 3mo, 6mo, 1y, 2y, 5y, 10y, ytd, max"),
-        BotCommand("track","Track a stock, format: /track <ticker> [buy_price]"),
+        BotCommand("track","Track a stock, format: /track <ticker> [buy_price] [update_every_x_hours], optional buy_price defaults to 0 if not provided, default update every 12 hours"),
+        BotCommand("track_change_interval","Change the update interval for a tracked stock, format: /track_change_interval <ticker> <update_interval_in_hours>"),
         BotCommand("untrack","Untrack a stock"),
         BotCommand("tracks","Show tracked stocks"),
         BotCommand("alert","Add an alert for a stock, usa < for high limit and > for low limit, example: /alert AUCO.L <1.5"),
@@ -476,7 +504,7 @@ def init_db():
     con = sqlite3.connect("bot.db")
     con.row_factory = sqlite3.Row
     # Create the tracks table if it doesn't exist
-    con.execute("CREATE TABLE IF NOT EXISTS tracks (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER, ticker TEXT, last_check TIMESTAMP DEFAULT CURRENT_TIMESTAMP, buy_price REAL NOT NULL DEFAULT 0);")
+    con.execute("CREATE TABLE IF NOT EXISTS tracks (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER, ticker TEXT, next_check TIMESTAMP DEFAULT CURRENT_TIMESTAMP, buy_price REAL NOT NULL DEFAULT 0, update_interval INTEGER NOT NULL DEFAULT 12);")
     con.execute("CREATE TABLE IF NOT EXISTS alerts (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER, ticker TEXT, last_check TIMESTAMP DEFAULT CURRENT_TIMESTAMP, limit_value TEXT NOT NULL);")
 
 if __name__ == '__main__':
