@@ -305,12 +305,12 @@ async def tracks(message):
         return
     global con
     cursor= con.cursor()
-    cursor.execute("SELECT ticker, buy_price, next_update, update_interval FROM tracks WHERE user_id=?;", (message.from_user.id,))
+    cursor.execute("SELECT ticker, buy_price, next_check, update_interval FROM tracks WHERE user_id=?;", (message.from_user.id,))
     tracks = cursor.fetchall()
     if tracks:
         response = "Tracked tickets:\n"
-        for ticker, buy_price, next_update, update_interval in tracks:
-            response += f"- {ticker} (Buy Price: {buy_price}, Next Update: {next_update}, Update Interval: {update_interval} hours)\n"
+        for ticker, buy_price, next_check, update_interval in tracks:
+            response += f"- {ticker} (Buy Price: {buy_price}, Next Update: {next_check}, Update Interval: {update_interval} hours)\n"
         await bot.reply_to(message, response)
     else:
         await bot.reply_to(message, "No tracked tickets.")
