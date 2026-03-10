@@ -406,7 +406,7 @@ async def actualiza_tickets():
             logging.info("Weekend detected, skipping price updates.")
         else:
             #Si no es fin de semana, se buscan los seguimientos
-            seguimentos= cursor.execute("SELECT * FROM tracks WHERE next_check < datetime('now');").fetchall()
+            seguimentos= cursor.execute("SELECT * FROM tracks WHERE next_check < datetime('now','+10 minutes');").fetchall()
             if seguimentos:
                 for seguimiento in seguimentos:
                     id, user_id, ticker, next_check, buy_price, update_interval = seguimiento
