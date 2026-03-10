@@ -40,6 +40,15 @@ def is_valid_user(id):
     allowed_users = [201580722, 201580722]  # Replace with actual user IDs
     return id in allowed_users
 
+@bot.message_handler(commands=['fin'])
+async def send_fin(message):
+    if not is_admin_user(message.from_user.id):
+        await bot.reply_to(message, "Unauthorized access.")
+        return
+    await bot.reply_to(message, "Bot is shutting down...")
+    exit()
+
+
 @bot.message_handler(commands=['start'])
 async def send_welcome(message):
     """Send a welcome message when the command /start is issued.
