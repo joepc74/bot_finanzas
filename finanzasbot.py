@@ -73,6 +73,7 @@ async def send_help(message):
     /track_change_interval <ticker> <update_interval_in_hours> - Change the update interval for a tracked stock.
     /untrack <ticker> - Stop tracking a stock.
     /tracks - Show tracked stocks.
+    /update_tracks [update_intervals] - Update tracked stocks without changing the next update time, use 'update_intervals' to also update the next update time.
     /alert <ticker> <limit_value> - Set an alert for a stock, use < for high limit and > for low limit, example: /alert AUCO.L <1.5
     /alerts - Show active alerts.
     /unalert <ticker> - Remove an alert for a stock, format: /unalert <stock_ticker>''')
@@ -403,7 +404,7 @@ async def comando_sql(message):
 
 @bot.message_handler(commands=['update_tracks'])
 async def comando_update_tracks(message):
-    await update_tracks_ciclo(forzado=True,user_id=message.from_user.id, update_interval=False)
+    await update_tracks_ciclo(forzado=True,user_id=message.from_user.id, update_interval='update_intervals' in message.text.split())
 
 async def update_tracks_ciclo(forzado=False,user_id=None, update_interval=True):
     global con
