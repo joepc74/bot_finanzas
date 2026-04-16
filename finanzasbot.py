@@ -40,7 +40,7 @@ def is_valid_user(id):
     allowed_users = [201580722, 201580722]  # Replace with actual user IDs
     return id in allowed_users
 
-@bot.message_handler(commands=['fin'])
+@bot.message_handler(commands=['fin','stop'])
 async def send_fin(message):
     if not is_admin_user(message.from_user.id):
         await bot.reply_to(message, "Unauthorized access.")
@@ -401,37 +401,46 @@ async def comando_sql(message):
     except Exception as e:
         logging.error(f"Error executing SQL command: {e}")
 
-async def actualiza_tickets():
+@bot.message_handler(commands=['update_tracks'])
+async def comando_update_tracks(message):
+    await update_tracks_ciclo(forzado=True,user_id=message.from_user.id, update_interval=False)
+
+async def update_tracks_ciclo(forzado=False,user_id=None, update_interval=True):
+    global con
+    cursor= con.cursor()
+    comandosql= "SELECT * FROM tracks WHERE TRUE"
+    if not forzado:
+        comandosql += " AND next_check < datetime('now','+10 minutes')"
+    if user_id:
+        comandosql += f" AND user_id={user_id}"
+    seguimentos= cursor.execute(comandosql).fetchall()
+    if seguimentos:
+        for seguimiento in seguimentos:
+            id, user_id, ticker, next_check, buy_price, update_interval = seguimiento
+            try:
+                stock = yf.Ticker(ticker)
+                current_price = stock.info['regularMarketPrice']
+                min_price=stock.info['dayLow']
+                max_price=stock.info['dayHigh']
+                open_price=stock.info['open']
+                change=round((current_price-open_price)/current_price*100,2) if current_price else 0
+                buy_change=round((current_price-buy_price)/current_price*100,2) if current_price and buy_price else 0
+                await bot.send_photo(chat_id=user_id, photo=graph(ticker,'1mo', buy_price=buy_price if buy_price!=0 else None),caption=f"Current price of {stock.info['longName']} ({ticker}): {current_price}\nOpen price: {open_price}\nMin: {min_price}\nMax: {max_price}\nChange: {change}%\nBuy Change: {buy_change}%")
+                if update_interval:
+                    cursor.execute(f"UPDATE tracks SET next_check=datetime('now', '+{update_interval} hours') WHERE id={id};")
+                    con.commit()
+            except Exception as e:
+                logging.error(f"Error sending message to {user_id}: {e.__str__()}")
+
+async def actualiza_tracks():
     """Continuously monitor and send price updates for tracked stocks every 12 hours.
 
     This function runs in an infinite loop, checking for stocks that need updates
     and sending price information to their respective users.
     """
-    global con
-    cursor= con.cursor()
     while True:
         logging.info("Checking for tickets ...")
-        if datetime.datetime.today().weekday()>=5: # no se actualizan los fines de semana
-            logging.info("Weekend detected, skipping price updates.")
-        else:
-            #Si no es fin de semana, se buscan los seguimientos
-            seguimentos= cursor.execute("SELECT * FROM tracks WHERE next_check < datetime('now','+10 minutes');").fetchall()
-            if seguimentos:
-                for seguimiento in seguimentos:
-                    id, user_id, ticker, next_check, buy_price, update_interval = seguimiento
-                    try:
-                        stock = yf.Ticker(ticker)
-                        current_price = stock.info['regularMarketPrice']
-                        min_price=stock.info['dayLow']
-                        max_price=stock.info['dayHigh']
-                        open_price=stock.info['open']
-                        change=round((current_price-open_price)/current_price*100,2) if current_price else 0
-                        buy_change=round((current_price-buy_price)/current_price*100,2) if current_price and buy_price else 0
-                        await bot.send_photo(chat_id=user_id, photo=graph(ticker,'1mo', buy_price=buy_price if buy_price!=0 else None),caption=f"Current price of {stock.info['longName']} ({ticker}): {current_price}\nOpen price: {open_price}\nMin: {min_price}\nMax: {max_price}\nChange: {change}%\nBuy Change: {buy_change}%")
-                        cursor.execute(f"UPDATE tracks SET next_check=datetime('now', '+{update_interval} hours') WHERE id={id};")
-                        con.commit()
-                    except Exception as e:
-                        logging.error(f"Error sending message to {user_id}: {e.__str__()}")
+        await update_tracks_ciclo(forzado=False)
         logging.info("Price updates checked. Next check in 1 hour.")
         await asyncio.sleep(60*60) # se ejecuta cada 1 hora
 
@@ -487,6 +496,7 @@ async def main():
         BotCommand("track_change_interval","Change the update interval for a tracked stock, format: /track_change_interval <ticker> <update_interval_in_hours>"),
         BotCommand("untrack","Untrack a stock"),
         BotCommand("tracks","Show tracked stocks"),
+        BotCommand("update_tracks","Update tracked stocks without changing the next update time"),
         BotCommand("alert","Add an alert for a stock, usa < for high limit and > for low limit, example: /alert AUCO.L <1.5"),
         BotCommand("alerts","Show active alerts"),
         BotCommand("unalert","Remove an alert, format: /unalert <stock_ticker>")
@@ -496,12 +506,12 @@ async def main():
         bot.add_custom_filter(asyncio_filters.StateFilter(bot))
         L = await asyncio.gather(
             # update_cambios(),
-            actualiza_tickets(),
+            actualiza_tracks(),
             actualiza_alertas(),
             bot.polling(non_stop=True)
             )
     finally:
-        bot.close()
+        await bot.close()
 
 def init_db():
     """Initialize the database connection and create the tracks table if it doesn't exist.
